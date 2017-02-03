@@ -65,6 +65,8 @@ func setup() (wordlist []string, domain string, threads int, err error) {
 
 	if *flag_domain == "" {
 		fmt.Println("You must specify a domain")
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
 
 	// Open wordlist
