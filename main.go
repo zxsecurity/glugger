@@ -4,14 +4,21 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 )
 
 var mux sync.Mutex
 var doer int
+
+// TODO: A bug exists in that we're only doing wildcard detection on the root domain
+// If a subdomain contains a wildcard, it will not be detected during recursive scanning
+var wildcard []string
+var wildcardDetected bool
 
 func main() {
 	// A channel for domains still to be processed
@@ -71,6 +78,15 @@ func setup() (wordlist []string, domain string, threads int, err error) {
 	for scanner.Scan() {
 		wordlist = append(wordlist, scanner.Text())
 	}
+
+	// Check for wildcard record(s)
+	randomString := randomString(10)
+	wildcard, _ = net.LookupHost(randomString + "." + *flag_domain)
+	if len(wildcard) > 0 {
+		fmt.Println("Detected wildcard record")
+		wildcardDetected = true
+	}
+
 	return wordlist, *flag_domain, *flag_threads, nil
 }
 
@@ -92,8 +108,13 @@ StartLock:
 		// Non-blocking recieve
 		select {
 		case word := <-toProcess:
-			_, err := net.LookupHost(word)
+			ips, err := net.LookupHost(word)
 			if err != nil {
+				break
+			}
+			// Check if it's a wildcard
+			if wildcardDetected && reflect.DeepEqual(ips, wildcard) {
+				// Not a real finding -- see note about the bug at wildcard definition
 				break
 			}
 			fmt.Println(word)
@@ -119,4 +140,13 @@ StartLock:
 	}
 	mux.Unlock()
 	goto StartLock
+}
+
+func randomString(length int) string {
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, length)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
 }
