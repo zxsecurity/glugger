@@ -69,6 +69,12 @@ func resolveList(queue chan string, apex string) chan bool {
 
 				// did not resolve
 				if err != nil {
+					// TODO: find a nicer way of writing this
+					errstr := err.Error()
+					nsh := "no such host"
+					if errstr[len(errstr)-len(nsh):] != nsh {
+						fmt.Printf("Unexpected error: %v\n", err)
+					}
 					return
 				}
 
