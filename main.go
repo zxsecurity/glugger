@@ -8,14 +8,15 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"sync"
 )
 
 var wordList []string
 
-// TODO: A bug exists in that we're only doing wildcard detection on the root domain
-// If a subdomain contains a wildcard, it will not be detected during recursive scanning
-var wildcard []string
-var wildcardDetected bool
+// This is a cache of the mapping of domains to their wildcard addresses, e.g.
+// *.example.com is stored as ["example.com"] = [127.0.0.1]
+var wildcardRegistry map[string][]string
+var wildcardRegistryMutex sync.RWMutex
 
 func main() {
 	// Parse cmdline
@@ -35,13 +36,10 @@ func main() {
 		panic(err)
 	}
 
-	// Check for wildcard record(s)
-	randomString := randomString(10)
-	wildcard, _ = net.LookupHost(randomString + "." + *flag_domain)
-	if len(wildcard) > 0 {
-		fmt.Println("Detected wildcard record")
-		wildcardDetected = true
-	}
+	// Make our new wildcard map
+	wildcardRegistry = make(map[string][]string)
+	// Check for wildcard record(s) before starting
+	wildcardDetected := checkWildcard(*flag_domain)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -49,11 +47,11 @@ func main() {
 	}
 
 	queue := make(chan string, *flag_threads)
-	done := resolveList(queue, *flag_domain)
+	done := resolveList(queue, *flag_domain, wildcardDetected)
 	<-done
 }
 
-func resolveList(queue chan string, apex string) chan bool {
+func resolveList(queue chan string, apex string, wildcardDetected bool) chan bool {
 	doneChan := make(chan bool)
 	go func() {
 		for i := range wordList {
@@ -79,14 +77,20 @@ func resolveList(queue chan string, apex string) chan bool {
 				}
 
 				// Check if it's a wildcard
-				if wildcardDetected && reflect.DeepEqual(ips, wildcard) {
-					// Not a real finding -- see note about the bug at wildcard definition
-					return
+				if wildcardDetected {
+					// Read lock the mutex
+					wildcardRegistryMutex.RLock()
+					if reflect.DeepEqual(ips, wildcardRegistry[apex]) {
+						// Not a real finding -- see note about the bug at wildcard definition
+						wildcardRegistryMutex.RUnlock()
+						return
+					}
+					wildcardRegistryMutex.RUnlock()
 				}
 
 				// we found a non-wildcard sub domain, recurse
 				fmt.Printf("%s %v\n", domainName, ips)
-				childDone := resolveList(queue, domainName)
+				childDone := resolveList(queue, domainName, checkWildcard(domainName))
 				// wait for child to finish
 				<-childDone
 			}()
@@ -94,6 +98,21 @@ func resolveList(queue chan string, apex string) chan bool {
 		doneChan <- true
 	}()
 	return doneChan
+}
+
+func checkWildcard(domain string) bool {
+	// Check for wildcard record(s)
+	randomString := randomString(10)
+	wildcard, _ := net.LookupHost(randomString + "." + domain)
+	if len(wildcard) > 0 {
+		fmt.Printf("Detected wildcard record: %s\r\n", domain)
+		// Lock for writing
+		wildcardRegistryMutex.Lock()
+		wildcardRegistry[domain] = wildcard
+		wildcardRegistryMutex.Unlock()
+		return true
+	}
+	return false
 }
 
 func randomString(length int) string {
