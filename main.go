@@ -27,7 +27,7 @@ func main() {
 	flag.Parse()
 
 	if *flag_domain == "" {
-		fmt.Println("You must specify a domain")
+		fmt.Fprint(os.Stderr, "You must specify a domain\r\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -71,7 +71,7 @@ func resolveList(queue chan string, apex string, wildcardDetected bool) chan boo
 					errstr := err.Error()
 					nsh := "no such host"
 					if errstr[len(errstr)-len(nsh):] != nsh {
-						fmt.Printf("Unexpected error: %v\n", err)
+						fmt.Fprintf(os.Stderr, "Unexpected error: %v\n", err)
 					}
 					return
 				}
@@ -105,7 +105,7 @@ func checkWildcard(domain string) bool {
 	randomString := randomString(10)
 	wildcard, _ := net.LookupHost(randomString + "." + domain)
 	if len(wildcard) > 0 {
-		fmt.Printf("Detected wildcard record: %s\r\n", domain)
+		fmt.Fprintf(os.Stderr, "Detected wildcard record: %s\r\n", domain)
 		// Lock for writing
 		wildcardRegistryMutex.Lock()
 		wildcardRegistry[domain] = wildcard
