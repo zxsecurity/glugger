@@ -74,12 +74,19 @@ func main() {
 func resolveList(queue chan string, apex string, wildcardDetected bool) chan bool {
 	doneChan := make(chan bool)
 	go func() {
+		// Create a waitgroup for all of the child threads we'll spawn
+		var childrenWait sync.WaitGroup
 		for i := range wordList {
 			domainName := fmt.Sprintf("%s.%s", wordList[i], apex)
 
 			// wait for free worker thread
 			queue <- domainName
+			// Add an item to the WaitGroup
+			childrenWait.Add(1)
 			go func() {
+				// Defer removing ourselves from the WaitGroup once we're complete
+				defer childrenWait.Done()
+
 				ips, err := net.LookupHost(domainName)
 				// we have looked up the host, so we can remove this item from the queue
 				// so that another go routine can give it a go
@@ -115,6 +122,10 @@ func resolveList(queue chan string, apex string, wildcardDetected bool) chan boo
 				<-childDone
 			}()
 		}
+		// Wait for all children to complete
+		childrenWait.Wait()
+
+		// Signal we're done
 		doneChan <- true
 	}()
 	return doneChan
