@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -18,11 +19,17 @@ var wordList []string
 var wildcardRegistry map[string][]string
 var wildcardRegistryMutex sync.RWMutex
 
+var outputType string
+
+// Whether this is the first line of output to print
+var outputFirst bool
+
 func main() {
 	// Parse cmdline
 	flag_domain := flag.String("domain", "", "The target domain")
 	flag_wordlist := flag.String("wordlist", "wordlist.txt", "Path to the wordlist")
 	flag_threads := flag.Int("threads", 20, "Number of concurrent threads")
+	flag_output := flag.String("output", "csv", "Output type (csv, json)")
 
 	flag.Parse()
 
@@ -31,6 +38,19 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
+
+	outputType = strings.ToLower(*flag_output)
+	outputFirst = true
+
+	switch outputType {
+	case "csv":
+	case "json":
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid output format specified\r\n")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
 	file, err := os.Open(*flag_wordlist)
 	if err != nil {
 		panic(err)
@@ -89,7 +109,7 @@ func resolveList(queue chan string, apex string, wildcardDetected bool) chan boo
 				}
 
 				// we found a non-wildcard sub domain, recurse
-				fmt.Printf("%s %v\n", domainName, ips)
+				outputResult(domainName, ips)
 				childDone := resolveList(queue, domainName, checkWildcard(domainName))
 				// wait for child to finish
 				<-childDone
@@ -113,6 +133,21 @@ func checkWildcard(domain string) bool {
 		return true
 	}
 	return false
+}
+
+func outputResult(domain string, ips []string) {
+	switch outputType {
+	case "json":
+		if outputFirst {
+			fmt.Printf("{\r\n")
+			outputFirst = false
+		} else {
+			fmt.Printf(",\r\n")
+		}
+		fmt.Printf("{\"%s\": {\"%s\"}}", domain, strings.Join(ips, "\",\""))
+	case "csv":
+		fmt.Printf("%s,%s\r\n", domain, strings.Join(ips, ","))
+	}
 }
 
 func randomString(length int) string {
