@@ -14,11 +14,6 @@ import (
 
 var wordList []string
 
-// This is a cache of the mapping of domains to their wildcard addresses, e.g.
-// *.example.com is stored as ["example.com"] = [127.0.0.1]
-var wildcardRegistry map[string][]string
-var wildcardRegistryMutex sync.RWMutex
-
 var outputType string
 
 // Whether this is the first line of output to print
@@ -56,10 +51,8 @@ func main() {
 		panic(err)
 	}
 
-	// Make our new wildcard map
-	wildcardRegistry = make(map[string][]string)
 	// Check for wildcard record(s) before starting
-	wildcardDetected := checkWildcard(*flag_domain)
+	wildcard := checkWildcard(*flag_domain)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -67,11 +60,11 @@ func main() {
 	}
 
 	queue := make(chan string, *flag_threads)
-	done := resolveList(queue, *flag_domain, wildcardDetected)
+	done := resolveList(queue, *flag_domain, wildcard)
 	<-done
 }
 
-func resolveList(queue chan string, apex string, wildcardDetected bool) chan bool {
+func resolveList(queue chan string, apex string, wildcard []string) chan bool {
 	doneChan := make(chan bool)
 	go func() {
 		// Create a waitgroup for all of the child threads we'll spawn
@@ -104,15 +97,10 @@ func resolveList(queue chan string, apex string, wildcardDetected bool) chan boo
 				}
 
 				// Check if it's a wildcard
-				if wildcardDetected {
-					// Read lock the mutex
-					wildcardRegistryMutex.RLock()
-					if reflect.DeepEqual(ips, wildcardRegistry[apex]) {
-						// Not a real finding -- see note about the bug at wildcard definition
-						wildcardRegistryMutex.RUnlock()
+				if len(wildcard) > 0 {
+					if reflect.DeepEqual(ips, wildcard) {
 						return
 					}
-					wildcardRegistryMutex.RUnlock()
 				}
 
 				// we found a non-wildcard sub domain, recurse
@@ -131,19 +119,14 @@ func resolveList(queue chan string, apex string, wildcardDetected bool) chan boo
 	return doneChan
 }
 
-func checkWildcard(domain string) bool {
+func checkWildcard(domain string) (wildcard []string) {
 	// Check for wildcard record(s)
 	randomString := randomString(10)
-	wildcard, _ := net.LookupHost(randomString + "." + domain)
+	wildcard, _ = net.LookupHost(randomString + "." + domain)
 	if len(wildcard) > 0 {
 		fmt.Fprintf(os.Stderr, "Detected wildcard record: %s\r\n", domain)
-		// Lock for writing
-		wildcardRegistryMutex.Lock()
-		wildcardRegistry[domain] = wildcard
-		wildcardRegistryMutex.Unlock()
-		return true
 	}
-	return false
+	return
 }
 
 func outputResult(domain string, ips []string) {
