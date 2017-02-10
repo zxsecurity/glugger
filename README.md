@@ -1,5 +1,7 @@
 # glugger
 
+[![Build Status](https://api.travis-ci.org/zxsecurity/glugger.svg?branch=master)](https://travis-ci.org/zxsecurity/glugger)
+
 A really faster DNS bruteforcer.
 It lacks features.
 
