@@ -1,8 +1,8 @@
 package main
 
 import (
-	"testing"
 	"reflect"
+	"testing"
 )
 
 // TODO: Write required setup for a local resolver with a variety of domains and test cases
