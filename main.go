@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/miekg/dns"
 )
 
 var wordList []string
@@ -40,6 +42,8 @@ func main() {
 	switch outputType {
 	case "csv":
 	case "json":
+		fmt.Printf("{\r\n")
+		defer fmt.Printf("\r\n}")
 	default:
 		fmt.Fprintf(os.Stderr, "Invalid output format specified\r\n")
 		flag.PrintDefaults()
@@ -51,8 +55,18 @@ func main() {
 		panic(err)
 	}
 
+	// TODO: Move a few of these operations to the resolveList function - DRY
 	// Check for wildcard record(s) before starting
 	wildcard := checkWildcard(*flag_domain)
+
+	// Check for zone transfer
+	if checkZoneTransfer(*flag_domain) {
+		// No need to continue in this case
+		// TODO: This will change when we recursively do checkZoneTransfers etc
+		// That will require a slight restructuring of the code, but should be simple enough
+		// See the note about DRY refactor
+		return
+	}
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -104,7 +118,13 @@ func resolveList(queue chan string, apex string, wildcard []string) chan bool {
 				}
 
 				// we found a non-wildcard sub domain, recurse
-				outputResult(domainName, ips)
+				if checkZoneTransfer(domainName) {
+					// No need to make the requests manually
+					return
+				}
+				for _, ip := range ips {
+					outputResult(domainName, "A", ip)
+				}
 				childDone := resolveList(queue, domainName, checkWildcard(domainName))
 				// wait for child to finish
 				<-childDone
@@ -129,18 +149,80 @@ func checkWildcard(domain string) (wildcard []string) {
 	return
 }
 
-func outputResult(domain string, ips []string) {
+func checkZoneTransfer(domain string) (success bool) {
+	// TODO: Add the ability to not attempt zoneTransfers
+	success = false // failure by default
+
+	// Find all nameservers for the AXFR attempt
+	nss, err := net.LookupNS(domain)
+	if err != nil {
+		// Don't bother reporting the error if there were no nameservers in the first place
+		//fmt.Fprintf(os.Stderr, "Error finding nameservers for %s: %s\r\n", domain, err)
+		return
+	}
+	if len(nss) == 0 {
+		fmt.Fprintf(os.Stderr, "Error finding a nameserver for %s\r\n", domain)
+		return
+	}
+
+	// Create our messages and client
+	m := new(dns.Msg)
+	m.SetAxfr(dns.Fqdn(domain))
+	// Explicitly create a client to use TCP
+	c := new(dns.Client)
+	c.Net = "tcp"
+
+	// Loop over each of the nameservers
+	for _, ns := range nss {
+		in, _, err := c.Exchange(m, ns.Host+":53")
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error attempting zone transfer for %s using nameserver %s: %s\r\n", domain, ns.Host, err)
+			continue
+		}
+
+		if len(in.Answer) == 0 {
+			// Expected failure of zone transfer
+			fmt.Fprintf(os.Stderr, "Zone transfer failed for %s using nameserver %s\r\n", domain, ns.Host)
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "Zone transfer successful for %s using nameserver %s\r\n", domain, ns.Host)
+
+		// TODO: We need to identify subzones that might be handled by different nameservers and recurse on those too
+		for _, record := range in.Answer {
+			// detect type of record
+			switch t := record.(type) {
+			case *dns.A:
+				outputResult(t.Header().Name, "A", t.A.String())
+			case *dns.CNAME:
+				outputResult(t.Header().Name, "CNAME", t.Target)
+			case *dns.TXT:
+				for _, txt := range t.Txt {
+					outputResult(t.Header().Name, "TXT", txt)
+				}
+			default:
+				fmt.Fprintf(os.Stderr, "Unable to detect type of entry in zonetransfer: %s\r\n", record)
+			}
+		}
+
+		// no need to continue querying additional nameservers, just return
+		return true
+	}
+	return
+}
+
+func outputResult(domain string, shortName string, value string) {
 	switch outputType {
 	case "json":
 		if outputFirst {
-			fmt.Printf("{\r\n")
 			outputFirst = false
 		} else {
 			fmt.Printf(",\r\n")
 		}
-		fmt.Printf("{\"%s\": {\"%s\"}}", domain, strings.Join(ips, "\",\""))
+		fmt.Printf("{\"%s\": {\"%s\", \"%s\"}}", domain, shortName, value)
 	case "csv":
-		fmt.Printf("%s,%s\r\n", domain, strings.Join(ips, ","))
+		fmt.Printf("%s,%s,%s\r\n", domain, shortName, value)
 	}
 }
 
