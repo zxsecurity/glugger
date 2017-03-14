@@ -19,3 +19,10 @@ func TestCheckWildcard(t *testing.T) {
 	}
 
 }
+
+func TestZoneTransfer(t *testing.T) {
+	// As before, this should be testing against a domain we control, but this will work for now
+	if checkZoneTransfer("zonetransfer.me") == false {
+		t.Error("Zone transfer attempt on zonetransfer.me failed")
+	}
+}
