@@ -26,6 +26,7 @@ var outputType string
 var outputFirst bool
 var zt bool
 var maxDepth int
+var verbose bool
 
 func main() {
 	go func() {
@@ -38,6 +39,7 @@ func main() {
 	flag_output := flag.String("output", "csv", "Output type (csv, json)")
 	flag_zt := flag.Bool("zt", false, "Zone Transfer")
 	flag_depth := flag.Int("depth", 0, "Depth to ignore wildcards/NX and continue bruteforce")
+	flag_verbose := flag.Bool("v", false, "Show errors")
 
 	flag.Parse()
 
@@ -49,6 +51,10 @@ func main() {
 
 	if *flag_zt {
 		zt = true
+	}
+
+	if *flag_verbose {
+		verbose = true
 	}
 
 	if *flag_depth > 0 {
@@ -104,7 +110,6 @@ func main() {
 }
 
 func resolveList(wg *sync.WaitGroup, queue chan struct{}, apex string, wildcard []string, depth int) {
-	//fmt.Println(depth, apex)
 	defer wg.Done()
 	// Create a waitgroup for all of the child threads we'll spawn
 	for i := range wordList {
@@ -128,7 +133,9 @@ func resolveList(wg *sync.WaitGroup, queue chan struct{}, apex string, wildcard 
 				errstr := err.Error()
 				nsh := "no such host"
 				if errstr[len(errstr)-len(nsh):] != nsh {
-					fmt.Fprintf(os.Stderr, "Unexpected error: %v\n", err)
+					if verbose {
+						fmt.Fprintf(os.Stderr, "Unexpected error: %v\n", err)
+					}
 					return
 				}
 				if maxDepth == 0 {
@@ -157,10 +164,6 @@ func resolveList(wg *sync.WaitGroup, queue chan struct{}, apex string, wildcard 
 			}
 
 		}()
-		// wait for child to finish
-		// Wait for all children to complete
-
-		// Signal we're done
 	}
 }
 
