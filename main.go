@@ -13,9 +13,6 @@ import (
 	"sync"
 
 	"github.com/miekg/dns"
-
-	"net/http"
-	_ "net/http/pprof"
 )
 
 var wordList []string
@@ -29,9 +26,7 @@ var maxDepth int
 var verbose bool
 
 func main() {
-	go func() {
-		http.ListenAndServe("localhost:6061", http.DefaultServeMux)
-	}()
+
 	// Parse cmdline
 	flag_domain := flag.String("domain", "", "The target domain")
 	flag_wordlist := flag.String("wordlist", "wordlist.txt", "Path to the wordlist")
@@ -175,10 +170,6 @@ func checkWildcard(domain string) (wildcard []string) {
 		fmt.Fprintf(os.Stderr, "Detected wildcard record: %s\r\n", domain)
 	}
 	return
-}
-
-func resolveName(domain string) {
-
 }
 
 func checkZoneTransfer(domain string) (success bool) {
