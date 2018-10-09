@@ -24,6 +24,10 @@ var outputFirst bool
 // Should we attempt a zone transfer
 var zonetransfer bool
 
+// The minimum depth to recurse to regardless of whether results are found
+// This can be used to force finding of "hidden" subdomains where x.y.z resolves, but not y.z
+var minDepth int
+
 func main() {
 	// Parse cmdline
 	flag_domain := flag.String("domain", "", "The target domain")
@@ -31,6 +35,7 @@ func main() {
 	flag_threads := flag.Int("threads", 20, "Number of concurrent threads")
 	flag_output := flag.String("output", "csv", "Output type (csv, json)")
 	flag_zonetransfer := flag.Bool("zt", true, "Attempt a zone transfer")
+	flag_minDepth := flag.Int("depth", 0, "Depth to ignore wildcards/NX and continue bruteforce (this is a 'minimum', so will find deeper subdomains if it can)")
 
 	flag.Parse()
 
@@ -56,6 +61,13 @@ func main() {
 
 	zonetransfer = *flag_zonetransfer
 
+	if *flag_minDepth < 0 {
+		fmt.Fprintf(os.Stderr, "Invalid depth detected. Must be 0 or greater")
+		os.Exit(1)
+	}
+	minDepth = *flag_minDepth
+	currentDepth := 0
+
 	file, err := os.Open(*flag_wordlist)
 	if err != nil {
 		panic(err)
@@ -80,11 +92,11 @@ func main() {
 	}
 
 	queue := make(chan string, *flag_threads)
-	done := resolveList(queue, *flag_domain, wildcard)
+	done := resolveList(queue, *flag_domain, wildcard, currentDepth)
 	<-done
 }
 
-func resolveList(queue chan string, apex string, wildcard []string) chan bool {
+func resolveList(queue chan string, apex string, wildcard []string, currentDepth int) chan bool {
 	doneChan := make(chan bool)
 	go func() {
 		// Create a waitgroup for all of the child threads we'll spawn
@@ -113,6 +125,13 @@ func resolveList(queue chan string, apex string, wildcard []string) chan bool {
 					if errstr[len(errstr)-len(nsh):] != nsh {
 						fmt.Fprintf(os.Stderr, "Unexpected error: %v\n", err)
 					}
+
+					// If we're not yet at the minimum depth, we need to recurse even if this didn't resolve
+					if currentDepth < minDepth {
+						childDone := resolveList(queue, domainName, checkWildcard(domainName), currentDepth+1)
+						// wait for child to finish
+						<-childDone
+					}
 					return
 				}
 
@@ -131,7 +150,7 @@ func resolveList(queue chan string, apex string, wildcard []string) chan bool {
 				for _, ip := range ips {
 					outputResult(domainName, "A", ip)
 				}
-				childDone := resolveList(queue, domainName, checkWildcard(domainName))
+				childDone := resolveList(queue, domainName, checkWildcard(domainName), currentDepth+1)
 				// wait for child to finish
 				<-childDone
 			}()
