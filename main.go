@@ -21,12 +21,16 @@ var outputType string
 // Whether this is the first line of output to print
 var outputFirst bool
 
+// Should we attempt a zone transfer
+var zonetransfer bool
+
 func main() {
 	// Parse cmdline
 	flag_domain := flag.String("domain", "", "The target domain")
 	flag_wordlist := flag.String("wordlist", "wordlist.txt", "Path to the wordlist")
 	flag_threads := flag.Int("threads", 20, "Number of concurrent threads")
 	flag_output := flag.String("output", "csv", "Output type (csv, json)")
+	flag_zonetransfer := flag.Bool("zt", true, "Attempt a zone transfer")
 
 	flag.Parse()
 
@@ -49,6 +53,8 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
+
+	zonetransfer = *flag_zonetransfer
 
 	file, err := os.Open(*flag_wordlist)
 	if err != nil {
@@ -150,7 +156,10 @@ func checkWildcard(domain string) (wildcard []string) {
 }
 
 func checkZoneTransfer(domain string) (success bool) {
-	// TODO: Add the ability to not attempt zoneTransfers
+	// Bypass this check if we're configured to not attempt zone transfers
+	if !zonetransfer {
+		return false
+	}
 	success = false // failure by default
 
 	// Find all nameservers for the AXFR attempt
